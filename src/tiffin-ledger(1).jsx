@@ -151,17 +151,19 @@ function GateShell({ children }) {
 }
 
 function SetupScreen({ onSetup }) {
+  const [username, setUsername] = useState("");
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (!username.trim()) { setErr("Please enter a username."); return; }
     if (pw.length < 4) { setErr("Password should be at least 4 characters."); return; }
     if (pw !== confirm) { setErr("Passwords don't match."); return; }
     setBusy(true);
     setErr("");
-    await onSetup(pw);
+    await onSetup(username.trim(), pw);
     setBusy(false);
   };
 
@@ -174,14 +176,15 @@ function SetupScreen({ onSetup }) {
         </span>
       </div>
       <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
-        Set the admin password. Whoever has this password can open and manage the ledger.
+        Set an admin username and password. Whoever has these can open and manage the ledger.
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <input className="tl-input" type="text" placeholder="Admin username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
         <input className="tl-input" type="password" placeholder="Admin password" value={pw} onChange={(e) => setPw(e.target.value)} />
         <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Setting up…" : "Set password & open ledger"}
+          {busy ? "Setting up…" : "Set username & password"}
         </button>
       </div>
     </div>
@@ -189,15 +192,17 @@ function SetupScreen({ onSetup }) {
 }
 
 function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (!username.trim()) { setErr("Please enter your username."); return; }
     setBusy(true);
     setErr("");
-    const ok = await onLogin(pw);
-    if (!ok) setErr("Wrong password.");
+    const ok = await onLogin(username.trim(), pw);
+    if (!ok) setErr("Wrong username or password.");
     setBusy(false);
   };
 
@@ -210,7 +215,8 @@ function LoginScreen({ onLogin }) {
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <input className="tl-input" type="password" placeholder="Password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+        <input className="tl-input" type="text" placeholder="Username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input className="tl-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
           {busy ? "Checking…" : "Log in"}
@@ -293,6 +299,7 @@ export default function TiffinLedger() {
   // --- auth state ---
   const [authLoaded, setAuthLoaded] = useState(false);
   const [adminHash, setAdminHash] = useState(null); // null = not set yet
+  const [adminUsername, setAdminUsername] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   // --- app data state ---
@@ -315,16 +322,17 @@ export default function TiffinLedger() {
   useEffect(() => {
     (async () => {
       try {
-        const authRes = await localStorage.getItem(AUTH_KEY);
-        if (authRes && authRes.value) {
-          const parsed = JSON.parse(authRes.value);
+        const authRes = localStorage.getItem(AUTH_KEY);
+        if (authRes) {
+          const parsed = JSON.parse(authRes);
           setAdminHash(parsed.hash || null);
+          setAdminUsername(parsed.username || null);
         }
       } catch (e) {
         // no admin set yet
       }
       try {
-        const sessionRes = await localStorage.getItem(SESSION_KEY);
+        const sessionRes = localStorage.getItem(SESSION_KEY);
         if (sessionRes === "true") setIsLoggedIn(true);
       } catch (e) {
         // no session yet
@@ -338,7 +346,7 @@ export default function TiffinLedger() {
     if (!isLoggedIn) return;
     (async () => {
       try {
-        const res = await localStorage.getItem(DATA_KEY);
+        const res = localStorage.getItem(DATA_KEY);
         if (res) {
           const parsed = JSON.parse(res);
           setData({ members: parsed.members || [], entries: parsed.entries || [] });
@@ -352,18 +360,19 @@ export default function TiffinLedger() {
     })();
   }, [isLoggedIn]);
 
-  const handleSetup = async (password) => {
+  const handleSetup = async (username, password) => {
     const hash = await sha256(password);
-    await localStorage.setItem(AUTH_KEY, JSON.stringify({ hash }));
-    await localStorage.setItem(SESSION_KEY, "true");
+    localStorage.setItem(AUTH_KEY, JSON.stringify({ username, hash }));
+    localStorage.setItem(SESSION_KEY, "true");
     setAdminHash(hash);
+    setAdminUsername(username);
     setIsLoggedIn(true);
   };
 
-  const handleLogin = async (password) => {
+  const handleLogin = async (username, password) => {
     const hash = await sha256(password);
-    if (hash === adminHash) {
-      await localStorage.setItem(SESSION_KEY, "true");
+    if (username === adminUsername && hash === adminHash) {
+      localStorage.setItem(SESSION_KEY, "true");
       setIsLoggedIn(true);
       return true;
     }
@@ -371,16 +380,15 @@ export default function TiffinLedger() {
   };
 
   const handleLogout = async () => {
-    await localStorage.setItem(SESSION_KEY, "false");
+    localStorage.setItem(SESSION_KEY, "false");
     setIsLoggedIn(false);
   };
 
-  const persist = useCallback(async (next) => {
+  const persist = useCallback((next) => {
     setData(next);
     try {
-      const res = await localStorage.setItem(DATA_KEY, JSON.stringify(next));
-      if (!res) setError("Couldn't save — please try again.");
-      else setError(null);
+      localStorage.setItem(DATA_KEY, JSON.stringify(next));
+      setError(null);
     } catch (e) {
       setError("Couldn't save — please try again.");
     }
@@ -415,7 +423,7 @@ export default function TiffinLedger() {
       memberId: formMember,
       date: formDate,
       meal: formMeal,
-      qty: Math.max(1, Number(formQty) || 1),
+      qty: Math.max(0, Number(formQty) || 0),
       note: formNote.trim(),
       ts: Date.now(),
     };
@@ -486,9 +494,16 @@ export default function TiffinLedger() {
                 Flat register · no more guessing
               </span>
             </div>
-            <button className="tl-btn" onClick={handleLogout} style={{ background: "transparent", color: "var(--ink-dim)", display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
-              <LogOut size={13} /> Log out
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              {adminUsername && (
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-dim)" }}>
+                  {adminUsername}
+                </span>
+              )}
+              <button className="tl-btn" onClick={handleLogout} style={{ background: "transparent", color: "var(--ink-dim)", display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
+                <LogOut size={13} /> Log out
+              </button>
+            </div>
           </div>
           <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 6vw, 46px)", letterSpacing: "0.02em", margin: 0, textTransform: "uppercase" }}>
             The Tiffin Ledger
@@ -565,7 +580,7 @@ export default function TiffinLedger() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--font-mono)" }}>QTY</label>
-                <input className="tl-input" type="number" min="1" style={{ width: 64 }} value={formQty} onChange={(e) => setFormQty(e.target.value)} />
+                <input className="tl-input" type="number" min="0" style={{ width: 64 }} value={formQty} onChange={(e) => setFormQty(e.target.value)} />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--font-mono)" }}>DATE</label>
