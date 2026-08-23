@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Plus, Trash2, Users, UtensilsCrossed, CalendarDays, LogOut, Lock, X, ChevronRight } from "lucide-react";
+import { supabase } from "./supabaseClient";
 
 const PALETTE = [
   "#E8A33D", "#4A7A63", "#B0587D", "#6C8CBF",
   "#8B4A3B", "#7C9E45", "#C77B3D", "#5B7B8A",
 ];
 
-const DATA_KEY = "tiffin-ledger-data";
-const AUTH_KEY = "tiffin-ledger-admin-auth";
+// SESSION_KEY stays in localStorage on purpose: it's just "am I logged in
+// on THIS device right now", which is fine to be per-device. Username,
+// password, and all ledger data now live in Supabase so every device sees
+// the same shared data.
 const SESSION_KEY = "tiffin-ledger-session";
 const MEALS = ["Lunch", "Dinner"];
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -322,14 +325,17 @@ export default function TiffinLedger() {
   useEffect(() => {
     (async () => {
       try {
-        const authRes = localStorage.getItem(AUTH_KEY);
-        if (authRes) {
-          const parsed = JSON.parse(authRes);
-          setAdminHash(parsed.hash || null);
-          setAdminUsername(parsed.username || null);
+        const { data: row, error } = await supabase
+          .from("ledger_state")
+          .select("username, password_hash")
+          .eq("id", 1)
+          .single();
+        if (!error && row) {
+          setAdminHash(row.password_hash || null);
+          setAdminUsername(row.username || null);
         }
       } catch (e) {
-        // no admin set yet
+        // couldn't reach Supabase yet
       }
       try {
         const sessionRes = localStorage.getItem(SESSION_KEY);
@@ -346,9 +352,13 @@ export default function TiffinLedger() {
     if (!isLoggedIn) return;
     (async () => {
       try {
-        const res = localStorage.getItem(DATA_KEY);
-        if (res) {
-          const parsed = JSON.parse(res);
+        const { data: row, error } = await supabase
+          .from("ledger_state")
+          .select("data")
+          .eq("id", 1)
+          .single();
+        if (!error && row?.data) {
+          const parsed = row.data;
           setData({ members: parsed.members || [], entries: parsed.entries || [] });
           if (parsed.members && parsed.members.length) setFormMember(parsed.members[0].id);
         }
@@ -360,9 +370,33 @@ export default function TiffinLedger() {
     })();
   }, [isLoggedIn]);
 
+  // stay in sync with other devices in real time
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const channel = supabase
+      .channel("ledger_state_changes")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "ledger_state", filter: "id=eq.1" },
+        (payload) => {
+          const parsed = payload.new?.data;
+          if (parsed) {
+            setData({ members: parsed.members || [], entries: parsed.entries || [] });
+          }
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isLoggedIn]);
+
   const handleSetup = async (username, password) => {
     const hash = await sha256(password);
-    localStorage.setItem(AUTH_KEY, JSON.stringify({ username, hash }));
+    await supabase
+      .from("ledger_state")
+      .update({ username, password_hash: hash })
+      .eq("id", 1);
     localStorage.setItem(SESSION_KEY, "true");
     setAdminHash(hash);
     setAdminUsername(username);
@@ -386,12 +420,18 @@ export default function TiffinLedger() {
 
   const persist = useCallback((next) => {
     setData(next);
-    try {
-      localStorage.setItem(DATA_KEY, JSON.stringify(next));
-      setError(null);
-    } catch (e) {
-      setError("Couldn't save — please try again.");
-    }
+    (async () => {
+      try {
+        const { error } = await supabase
+          .from("ledger_state")
+          .update({ data: next, updated_at: new Date().toISOString() })
+          .eq("id", 1);
+        if (error) setError("Couldn't save — please try again.");
+        else setError(null);
+      } catch (e) {
+        setError("Couldn't save — please try again.");
+      }
+    })();
   }, []);
 
   const addMember = () => {
