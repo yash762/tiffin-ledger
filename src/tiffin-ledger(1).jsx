@@ -158,6 +158,8 @@ function SetupScreen({ onSetup }) {
   const [username, setUsername] = useState("");
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -165,9 +167,11 @@ function SetupScreen({ onSetup }) {
     if (!username.trim()) { setErr("Please enter your name."); return; }
     if (pw.length < 4) { setErr("Password should be at least 4 characters."); return; }
     if (pw !== confirm) { setErr("Passwords don't match."); return; }
+    if (!question.trim()) { setErr("Please add a security question."); return; }
+    if (!answer.trim()) { setErr("Please add an answer to your security question."); return; }
     setBusy(true);
     setErr("");
-    const ok = await onSetup(username.trim(), pw);
+    const ok = await onSetup(username.trim(), pw, question.trim(), answer.trim());
     if (!ok) setErr("Something went wrong — try again.");
     setBusy(false);
   };
@@ -186,7 +190,13 @@ function SetupScreen({ onSetup }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input className="tl-input" type="text" placeholder="Your name" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
         <input className="tl-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} />
-        <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+        <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
+        <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+          Security question — used to reset your password if you forget it.
+        </span>
+        <input className="tl-input" type="text" placeholder="e.g. What's your pet's name?" value={question} onChange={(e) => setQuestion(e.target.value)} />
+        <input className="tl-input" type="text" placeholder="Answer" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
           {busy ? "Setting up…" : "Create my account"}
@@ -196,7 +206,7 @@ function SetupScreen({ onSetup }) {
   );
 }
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onForgot }) {
   const [username, setUsername] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
@@ -226,7 +236,111 @@ function LoginScreen({ onLogin }) {
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
           {busy ? "Checking…" : "Log in"}
         </button>
+        <button
+          type="button"
+          onClick={onForgot}
+          style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 2 }}
+        >
+          Forgot username or password?
+        </button>
       </div>
+    </div>
+  );
+}
+
+function ForgotPasswordScreen({ members, onReset, onCancel }) {
+  const [step, setStep] = useState("pick"); // "pick" | "answer"
+  const [selectedId, setSelectedId] = useState(null);
+  const [answer, setAnswer] = useState("");
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const selected = members.find((m) => m.id === selectedId) || null;
+
+  const submit = async () => {
+    if (!answer.trim()) { setErr("Please answer the security question."); return; }
+    if (pw.length < 4) { setErr("New password should be at least 4 characters."); return; }
+    if (pw !== confirm) { setErr("Passwords don't match."); return; }
+    setBusy(true);
+    setErr("");
+    const ok = await onReset(selectedId, answer.trim(), pw);
+    if (!ok) setErr("That answer doesn't match. Try again.");
+    setBusy(false);
+  };
+
+  if (step === "pick") {
+    return (
+      <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 10, padding: 22 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+          <Lock size={14} color="var(--accent)" />
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-dim)" }}>
+            Who are you?
+          </span>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
+          Pick your name from the flat's list.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {members.map((m) => (
+            <button
+              key={m.id}
+              className="tl-btn"
+              onClick={() => { setSelectedId(m.id); setStep("answer"); setErr(""); }}
+              style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: m.color, flexShrink: 0 }} />
+              {m.name}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+        >
+          Back to login
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 10, padding: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <Lock size={14} color="var(--accent)" />
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-dim)" }}>
+          Reset password — {selected?.name}
+        </span>
+      </div>
+
+      {!selected?.security_question ? (
+        <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
+          No security question was set up for this account, so it can't be self-recovered. Ask whoever manages the flat to help, or clear this account and re-add it.
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 6 }}>
+            {selected.security_question}
+          </p>
+          <input className="tl-input" type="text" placeholder="Your answer" autoFocus value={answer} onChange={(e) => setAnswer(e.target.value)} />
+          <input className="tl-input" type="password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <input className="tl-input" type="password" placeholder="Confirm new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
+          <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Resetting…" : "Reset password & log in"}
+          </button>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setStep("pick")}
+        style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 12 }}
+      >
+        Not you? Pick a different name
+      </button>
     </div>
   );
 }
@@ -235,6 +349,8 @@ function AddFlatmateModal({ onAdd, onClose, existingUsernames }) {
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -246,9 +362,11 @@ function AddFlatmateModal({ onAdd, onClose, existingUsernames }) {
     }
     if (pw.length < 4) { setErr("Password should be at least 4 characters."); return; }
     if (pw !== confirm) { setErr("Passwords don't match."); return; }
+    if (!question.trim()) { setErr("Please add a security question."); return; }
+    if (!answer.trim()) { setErr("Please add an answer."); return; }
     setBusy(true);
     setErr("");
-    await onAdd(trimmed, pw);
+    await onAdd(trimmed, pw, question.trim(), answer.trim());
     setBusy(false);
   };
 
@@ -267,12 +385,18 @@ function AddFlatmateModal({ onAdd, onClose, existingUsernames }) {
           </button>
         </div>
         <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
-          Give this flatmate their own name and password — they'll log in with these, and only they'll be able to edit or delete their own entries.
+          Give this flatmate their own name, password, and a security question — they'll use these to log in and to reset their own password later if needed.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <input className="tl-input" type="text" placeholder="Name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
           <input className="tl-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} />
-          <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          <div style={{ height: 1, background: "var(--line)", margin: "4px 0" }} />
+          <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+            Security question — used to reset this password later.
+          </span>
+          <input className="tl-input" type="text" placeholder="e.g. What's your pet's name?" value={question} onChange={(e) => setQuestion(e.target.value)} />
+          <input className="tl-input" type="text" placeholder="Answer" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
           {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
           <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
             {busy ? "Adding…" : "Add flatmate"}
@@ -366,6 +490,7 @@ export default function TiffinLedger() {
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState("week");
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState(null);
 
   const [formMeal, setFormMeal] = useState("Lunch");
@@ -438,10 +563,19 @@ export default function TiffinLedger() {
     }
   }, [isLoggedIn, loaded, currentUserId, currentUser]);
 
-  const handleSetup = async (name, password) => {
+  const handleSetup = async (name, password, question, answer) => {
     const hash = await sha256(password);
+    const answerHash = await sha256(answer.trim().toLowerCase());
     const color = PALETTE[0];
-    const member = { id: uid(), name, color, username: name, password_hash: hash };
+    const member = {
+      id: uid(),
+      name,
+      color,
+      username: name,
+      password_hash: hash,
+      security_question: question,
+      security_answer_hash: answerHash,
+    };
     const next = { members: [member], entries: [] };
     try {
       const { error } = await supabase
@@ -475,6 +609,25 @@ export default function TiffinLedger() {
     return false;
   };
 
+  const handleResetPassword = async (memberId, answer, newPassword) => {
+    const member = data.members.find((m) => m.id === memberId);
+    if (!member || !member.security_answer_hash) return false;
+    const answerHash = await sha256(answer.trim().toLowerCase());
+    if (answerHash !== member.security_answer_hash) return false;
+    const newHash = await sha256(newPassword);
+    const next = {
+      ...data,
+      members: data.members.map((m) => (m.id === memberId ? { ...m, password_hash: newHash } : m)),
+    };
+    persist(next);
+    localStorage.setItem(SESSION_KEY, "true");
+    localStorage.setItem(CURRENT_USER_KEY, memberId);
+    setCurrentUserId(memberId);
+    setIsLoggedIn(true);
+    setShowForgot(false);
+    return true;
+  };
+
   const handleLogout = async () => {
     localStorage.setItem(SESSION_KEY, "false");
     localStorage.removeItem(CURRENT_USER_KEY);
@@ -498,10 +651,19 @@ export default function TiffinLedger() {
     })();
   }, []);
 
-  const addFlatmate = async (name, password) => {
+  const addFlatmate = async (name, password, question, answer) => {
     const hash = await sha256(password);
+    const answerHash = await sha256(answer.trim().toLowerCase());
     const color = PALETTE[data.members.length % PALETTE.length];
-    const member = { id: uid(), name, color, username: name, password_hash: hash };
+    const member = {
+      id: uid(),
+      name,
+      color,
+      username: name,
+      password_hash: hash,
+      security_question: question,
+      security_answer_hash: answerHash,
+    };
     const next = { ...data, members: [...data.members, member] };
     persist(next);
     setShowAddMember(false);
@@ -608,7 +770,15 @@ export default function TiffinLedger() {
   if (!isLoggedIn || !currentUser) {
     return (
       <GateShell>
-        <LoginScreen onLogin={handleLogin} />
+        {showForgot ? (
+          <ForgotPasswordScreen
+            members={data.members}
+            onReset={handleResetPassword}
+            onCancel={() => setShowForgot(false)}
+          />
+        ) : (
+          <LoginScreen onLogin={handleLogin} onForgot={() => setShowForgot(true)} />
+        )}
       </GateShell>
     );
   }
