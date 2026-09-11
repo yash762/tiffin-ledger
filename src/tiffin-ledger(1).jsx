@@ -14,6 +14,7 @@ const PALETTE = [
 const SESSION_KEY = "tiffin-ledger-session";
 const CURRENT_USER_KEY = "tiffin-ledger-current-user";
 const MEALS = ["Lunch", "Dinner"];
+const MAX_FLATMATES = 7;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 function uid() {
@@ -154,7 +155,7 @@ function GateShell({ children }) {
   );
 }
 
-function SetupScreen({ onSetup }) {
+function SetupScreen({ onSetup, isFirst, onGoToLogin }) {
   const [username, setUsername] = useState("");
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -171,8 +172,8 @@ function SetupScreen({ onSetup }) {
     if (!answer.trim()) { setErr("Please add an answer to your security question."); return; }
     setBusy(true);
     setErr("");
-    const ok = await onSetup(username.trim(), pw, question.trim(), answer.trim());
-    if (!ok) setErr("Something went wrong — try again.");
+    const res = await onSetup(username.trim(), pw, question.trim(), answer.trim());
+    if (!res.ok) setErr(res.message || "Something went wrong — try again.");
     setBusy(false);
   };
 
@@ -181,11 +182,13 @@ function SetupScreen({ onSetup }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <Lock size={14} color="var(--accent)" />
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-dim)" }}>
-          First-time setup
+          {isFirst ? "First-time setup" : "Create your account"}
         </span>
       </div>
       <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
-        This creates the first flatmate account (you). Everyone else gets their own name + password once you're in — nobody shares a login anymore.
+        {isFirst
+          ? "This creates the first flatmate account (you). Everyone else creates their own the same way — nobody shares a login."
+          : "Set your own name and password. Nobody else needs to know them — not even other flatmates."}
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input className="tl-input" type="text" placeholder="Your name" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -201,12 +204,21 @@ function SetupScreen({ onSetup }) {
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
           {busy ? "Setting up…" : "Create my account"}
         </button>
+        {!isFirst && (
+          <button
+            type="button"
+            onClick={onGoToLogin}
+            style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 2 }}
+          >
+            Already have an account? Log in
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function LoginScreen({ onLogin, onForgot }) {
+function LoginScreen({ onLogin, onForgot, onGoToSignup }) {
   const [username, setUsername] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
@@ -236,13 +248,22 @@ function LoginScreen({ onLogin, onForgot }) {
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
           {busy ? "Checking…" : "Log in"}
         </button>
-        <button
-          type="button"
-          onClick={onForgot}
-          style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 2 }}
-        >
-          Forgot username or password?
-        </button>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+          <button
+            type="button"
+            onClick={onGoToSignup}
+            style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+          >
+            New here? Create account
+          </button>
+          <button
+            type="button"
+            onClick={onForgot}
+            style={{ background: "transparent", border: "none", color: "var(--ink-dim)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+          >
+            Forgot username or password?
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -491,6 +512,7 @@ export default function TiffinLedger() {
   const [period, setPeriod] = useState("week");
   const [showAddMember, setShowAddMember] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
+  const [authMode, setAuthMode] = useState(null); // null = default (signup if empty, else login), or explicit "login" | "signup"
   const [selectedMemberId, setSelectedMemberId] = useState(null);
 
   const [formMeal, setFormMeal] = useState("Lunch");
@@ -563,35 +585,42 @@ export default function TiffinLedger() {
     }
   }, [isLoggedIn, loaded, currentUserId, currentUser]);
 
-  const handleSetup = async (name, password, question, answer) => {
+  const handleSignup = async (name, password, question, answer) => {
+    const trimmed = name.trim();
+    if (data.members.some((m) => (m.username || "").toLowerCase() === trimmed.toLowerCase())) {
+      return { ok: false, message: "That name is already taken — try another." };
+    }
+    if (data.members.length >= MAX_FLATMATES) {
+      return { ok: false, message: `This flat already has ${MAX_FLATMATES} flatmates.` };
+    }
     const hash = await sha256(password);
     const answerHash = await sha256(answer.trim().toLowerCase());
-    const color = PALETTE[0];
+    const color = PALETTE[data.members.length % PALETTE.length];
     const member = {
       id: uid(),
-      name,
+      name: trimmed,
       color,
-      username: name,
+      username: trimmed,
       password_hash: hash,
       security_question: question,
       security_answer_hash: answerHash,
     };
-    const next = { members: [member], entries: [] };
+    const next = { members: [...data.members, member], entries: data.entries };
     try {
       const { error } = await supabase
         .from("ledger_state")
         .update({ data: next, updated_at: new Date().toISOString() })
         .eq("id", 1);
-      if (error) return false;
+      if (error) return { ok: false, message: "Something went wrong — try again." };
     } catch (e) {
-      return false;
+      return { ok: false, message: "Something went wrong — try again." };
     }
     setData(next);
     localStorage.setItem(SESSION_KEY, "true");
     localStorage.setItem(CURRENT_USER_KEY, member.id);
     setCurrentUserId(member.id);
     setIsLoggedIn(true);
-    return true;
+    return { ok: true };
   };
 
   const handleLogin = async (name, password) => {
@@ -652,6 +681,10 @@ export default function TiffinLedger() {
   }, []);
 
   const addFlatmate = async (name, password, question, answer) => {
+    if (data.members.length >= MAX_FLATMATES) {
+      setError(`This flat already has ${MAX_FLATMATES} flatmates.`);
+      return;
+    }
     const hash = await sha256(password);
     const answerHash = await sha256(answer.trim().toLowerCase());
     const color = PALETTE[data.members.length % PALETTE.length];
@@ -759,26 +792,41 @@ export default function TiffinLedger() {
     );
   }
 
-  if (data.members.length === 0) {
-    return (
-      <GateShell>
-        <SetupScreen onSetup={handleSetup} />
-      </GateShell>
-    );
-  }
-
   if (!isLoggedIn || !currentUser) {
-    return (
-      <GateShell>
-        {showForgot ? (
+    const isFirst = data.members.length === 0;
+    const effectiveMode = authMode || (isFirst ? "signup" : "login");
+
+    if (showForgot) {
+      return (
+        <GateShell>
           <ForgotPasswordScreen
             members={data.members}
             onReset={handleResetPassword}
             onCancel={() => setShowForgot(false)}
           />
-        ) : (
-          <LoginScreen onLogin={handleLogin} onForgot={() => setShowForgot(true)} />
-        )}
+        </GateShell>
+      );
+    }
+
+    if (effectiveMode === "signup") {
+      return (
+        <GateShell>
+          <SetupScreen
+            onSetup={handleSignup}
+            isFirst={isFirst}
+            onGoToLogin={() => setAuthMode("login")}
+          />
+        </GateShell>
+      );
+    }
+
+    return (
+      <GateShell>
+        <LoginScreen
+          onLogin={handleLogin}
+          onForgot={() => setShowForgot(true)}
+          onGoToSignup={() => setAuthMode("signup")}
+        />
       </GateShell>
     );
   }
