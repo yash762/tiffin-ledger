@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Plus, Trash2, Users, UtensilsCrossed, CalendarDays, LogOut, Lock, X, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Users, UtensilsCrossed, CalendarDays, LogOut, Lock, X, ChevronRight, Pencil, Check } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const PALETTE = [
@@ -12,6 +12,7 @@ const PALETTE = [
 // password, and all ledger data now live in Supabase so every device sees
 // the same shared data.
 const SESSION_KEY = "tiffin-ledger-session";
+const CURRENT_USER_KEY = "tiffin-ledger-current-user";
 const MEALS = ["Lunch", "Dinner"];
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -161,12 +162,13 @@ function SetupScreen({ onSetup }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!username.trim()) { setErr("Please enter a username."); return; }
+    if (!username.trim()) { setErr("Please enter your name."); return; }
     if (pw.length < 4) { setErr("Password should be at least 4 characters."); return; }
     if (pw !== confirm) { setErr("Passwords don't match."); return; }
     setBusy(true);
     setErr("");
-    await onSetup(username.trim(), pw);
+    const ok = await onSetup(username.trim(), pw);
+    if (!ok) setErr("Something went wrong — try again.");
     setBusy(false);
   };
 
@@ -179,15 +181,15 @@ function SetupScreen({ onSetup }) {
         </span>
       </div>
       <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
-        Set an admin username and password. Whoever has these can open and manage the ledger.
+        This creates the first flatmate account (you). Everyone else gets their own name + password once you're in — nobody shares a login anymore.
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <input className="tl-input" type="text" placeholder="Admin username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input className="tl-input" type="password" placeholder="Admin password" value={pw} onChange={(e) => setPw(e.target.value)} />
+        <input className="tl-input" type="text" placeholder="Your name" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input className="tl-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} />
         <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Setting up…" : "Set username & password"}
+          {busy ? "Setting up…" : "Create my account"}
         </button>
       </div>
     </div>
@@ -201,11 +203,11 @@ function LoginScreen({ onLogin }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!username.trim()) { setErr("Please enter your username."); return; }
+    if (!username.trim()) { setErr("Please enter your name."); return; }
     setBusy(true);
     setErr("");
     const ok = await onLogin(username.trim(), pw);
-    if (!ok) setErr("Wrong username or password.");
+    if (!ok) setErr("Wrong name or password.");
     setBusy(false);
   };
 
@@ -214,16 +216,68 @@ function LoginScreen({ onLogin }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
         <Lock size={14} color="var(--accent)" />
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-dim)" }}>
-          Admin login
+          Flatmate login
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <input className="tl-input" type="text" placeholder="Username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input className="tl-input" type="text" placeholder="Your name" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
         <input className="tl-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
         <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
           {busy ? "Checking…" : "Log in"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function AddFlatmateModal({ onAdd, onClose, existingUsernames }) {
+  const [name, setName] = useState("");
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) { setErr("Please enter a name."); return; }
+    if (existingUsernames.some((u) => u.toLowerCase() === trimmed.toLowerCase())) {
+      setErr("That name is already taken — try another."); return;
+    }
+    if (pw.length < 4) { setErr("Password should be at least 4 characters."); return; }
+    if (pw !== confirm) { setErr("Passwords don't match."); return; }
+    setBusy(true);
+    setErr("");
+    await onAdd(trimmed, pw);
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 }}>
+      <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 10, padding: 22, width: 360, maxWidth: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Lock size={14} color="var(--accent)" />
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-dim)" }}>
+              Add flatmate
+            </span>
+          </div>
+          <button className="tl-btn" onClick={onClose} style={{ background: "transparent", color: "var(--ink-dim)", display: "flex", padding: 4 }}>
+            <X size={16} />
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--ink-dim)", marginTop: 0, marginBottom: 16 }}>
+          Give this flatmate their own name and password — they'll log in with these, and only they'll be able to edit or delete their own entries.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <input className="tl-input" type="text" placeholder="Name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="tl-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <input className="tl-input" type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          {err && <span style={{ color: "#E39A8F", fontSize: 12 }}>{err}</span>}
+          <button className="tl-btn" onClick={submit} disabled={busy} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "10px 16px", opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Adding…" : "Add flatmate"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -300,56 +354,34 @@ function PersonDetail({ member, entries, onClose }) {
 
 export default function TiffinLedger() {
   // --- auth state ---
+  // Each flatmate is now their own account, stored as a member with a
+  // username + password_hash. There is no single shared admin anymore.
   const [authLoaded, setAuthLoaded] = useState(false);
-  const [adminHash, setAdminHash] = useState(null); // null = not set yet
-  const [adminUsername, setAdminUsername] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   // --- app data state ---
   const [data, setData] = useState({ members: [], entries: [] });
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [period, setPeriod] = useState("week");
-  const [newMemberName, setNewMemberName] = useState("");
   const [showAddMember, setShowAddMember] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState(null);
 
-  const [formMember, setFormMember] = useState("");
   const [formMeal, setFormMeal] = useState("Lunch");
   const [formQty, setFormQty] = useState(1);
   const [formDate, setFormDate] = useState(todayISO());
   const [formNote, setFormNote] = useState("");
   const [filterMember, setFilterMember] = useState("all");
 
-  // load auth + session
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data: row, error } = await supabase
-          .from("ledger_state")
-          .select("username, password_hash")
-          .eq("id", 1)
-          .single();
-        if (!error && row) {
-          setAdminHash(row.password_hash || null);
-          setAdminUsername(row.username || null);
-        }
-      } catch (e) {
-        // couldn't reach Supabase yet
-      }
-      try {
-        const sessionRes = localStorage.getItem(SESSION_KEY);
-        if (sessionRes === "true") setIsLoggedIn(true);
-      } catch (e) {
-        // no session yet
-      }
-      setAuthLoaded(true);
-    })();
-  }, []);
+  const currentUser = useMemo(
+    () => data.members.find((m) => m.id === currentUserId) || null,
+    [data.members, currentUserId]
+  );
 
-  // load app data once logged in
+  // load the shared ledger row (members list is needed up front to know
+  // whether to show Setup, Login, or the app, and to check login credentials)
   useEffect(() => {
-    if (!isLoggedIn) return;
     (async () => {
       try {
         const { data: row, error } = await supabase
@@ -360,19 +392,27 @@ export default function TiffinLedger() {
         if (!error && row?.data) {
           const parsed = row.data;
           setData({ members: parsed.members || [], entries: parsed.entries || [] });
-          if (parsed.members && parsed.members.length) setFormMember(parsed.members[0].id);
         }
       } catch (e) {
-        // fresh ledger
-      } finally {
-        setLoaded(true);
+        // couldn't reach Supabase yet
       }
+      try {
+        const sessionRes = localStorage.getItem(SESSION_KEY);
+        const savedUserId = localStorage.getItem(CURRENT_USER_KEY);
+        if (sessionRes === "true" && savedUserId) {
+          setCurrentUserId(savedUserId);
+          setIsLoggedIn(true);
+        }
+      } catch (e) {
+        // no session yet
+      }
+      setAuthLoaded(true);
+      setLoaded(true);
     })();
-  }, [isLoggedIn]);
+  }, []);
 
   // stay in sync with other devices in real time
   useEffect(() => {
-    if (!isLoggedIn) return;
     const channel = supabase
       .channel("ledger_state_changes")
       .on(
@@ -389,24 +429,46 @@ export default function TiffinLedger() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isLoggedIn]);
+  }, []);
 
-  const handleSetup = async (username, password) => {
+  // if the logged-in user's account gets removed on another device, log out here too
+  useEffect(() => {
+    if (isLoggedIn && loaded && currentUserId && !currentUser) {
+      handleLogout();
+    }
+  }, [isLoggedIn, loaded, currentUserId, currentUser]);
+
+  const handleSetup = async (name, password) => {
     const hash = await sha256(password);
-    await supabase
-      .from("ledger_state")
-      .update({ username, password_hash: hash })
-      .eq("id", 1);
+    const color = PALETTE[0];
+    const member = { id: uid(), name, color, username: name, password_hash: hash };
+    const next = { members: [member], entries: [] };
+    try {
+      const { error } = await supabase
+        .from("ledger_state")
+        .update({ data: next, updated_at: new Date().toISOString() })
+        .eq("id", 1);
+      if (error) return false;
+    } catch (e) {
+      return false;
+    }
+    setData(next);
     localStorage.setItem(SESSION_KEY, "true");
-    setAdminHash(hash);
-    setAdminUsername(username);
+    localStorage.setItem(CURRENT_USER_KEY, member.id);
+    setCurrentUserId(member.id);
     setIsLoggedIn(true);
+    return true;
   };
 
-  const handleLogin = async (username, password) => {
+  const handleLogin = async (name, password) => {
     const hash = await sha256(password);
-    if (username === adminUsername && hash === adminHash) {
+    const match = data.members.find(
+      (m) => (m.username || "").toLowerCase() === name.toLowerCase() && m.password_hash === hash
+    );
+    if (match) {
       localStorage.setItem(SESSION_KEY, "true");
+      localStorage.setItem(CURRENT_USER_KEY, match.id);
+      setCurrentUserId(match.id);
       setIsLoggedIn(true);
       return true;
     }
@@ -415,7 +477,9 @@ export default function TiffinLedger() {
 
   const handleLogout = async () => {
     localStorage.setItem(SESSION_KEY, "false");
+    localStorage.removeItem(CURRENT_USER_KEY);
     setIsLoggedIn(false);
+    setCurrentUserId(null);
   };
 
   const persist = useCallback((next) => {
@@ -434,33 +498,31 @@ export default function TiffinLedger() {
     })();
   }, []);
 
-  const addMember = () => {
-    const name = newMemberName.trim();
-    if (!name) return;
+  const addFlatmate = async (name, password) => {
+    const hash = await sha256(password);
     const color = PALETTE[data.members.length % PALETTE.length];
-    const member = { id: uid(), name, color };
+    const member = { id: uid(), name, color, username: name, password_hash: hash };
     const next = { ...data, members: [...data.members, member] };
     persist(next);
-    setNewMemberName("");
     setShowAddMember(false);
-    if (!formMember) setFormMember(member.id);
   };
 
   const removeMember = (id) => {
+    if (id !== currentUserId) return; // you can only remove your own account
     const next = {
       members: data.members.filter((m) => m.id !== id),
       entries: data.entries.filter((e) => e.memberId !== id),
     };
     persist(next);
-    if (formMember === id) setFormMember(next.members[0]?.id || "");
     if (selectedMemberId === id) setSelectedMemberId(null);
+    handleLogout();
   };
 
   const logEntry = () => {
-    if (!formMember) return;
+    if (!currentUserId) return;
     const entry = {
       id: uid(),
-      memberId: formMember,
+      memberId: currentUserId,
       date: formDate,
       meal: formMeal,
       qty: Math.max(0, Number(formQty) || 0),
@@ -474,8 +536,38 @@ export default function TiffinLedger() {
   };
 
   const deleteEntry = (id) => {
+    const target = data.entries.find((e) => e.id === id);
+    if (!target || target.memberId !== currentUserId) return; // only the owner can delete
     const next = { ...data, entries: data.entries.filter((e) => e.id !== id) };
     persist(next);
+  };
+
+  const [editingId, setEditingId] = useState(null);
+  const [editQty, setEditQty] = useState(0);
+  const [editNote, setEditNote] = useState("");
+
+  const startEdit = (entry) => {
+    if (entry.memberId !== currentUserId) return; // only the owner can edit
+    setEditingId(entry.id);
+    setEditQty(entry.qty);
+    setEditNote(entry.note || "");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+  };
+
+  const saveEdit = (id) => {
+    const target = data.entries.find((e) => e.id === id);
+    if (!target || target.memberId !== currentUserId) return; // only the owner can save
+    const next = {
+      ...data,
+      entries: data.entries.map((e) =>
+        e.id === id ? { ...e, qty: Math.max(0, Number(editQty) || 0), note: editNote.trim() } : e
+      ),
+    };
+    persist(next);
+    setEditingId(null);
   };
 
   const periodEntries = useMemo(() => data.entries.filter((e) => inPeriod(e.date, period)), [data.entries, period]);
@@ -497,7 +589,7 @@ export default function TiffinLedger() {
   const selectedMember = selectedMemberId ? memberById(selectedMemberId) : null;
 
   // --- render gates ---
-  if (!authLoaded) {
+  if (!authLoaded || !loaded) {
     return (
       <GateShell>
         <p style={{ textAlign: "center", color: "var(--ink-dim)", fontSize: 13 }}>Loading…</p>
@@ -505,7 +597,7 @@ export default function TiffinLedger() {
     );
   }
 
-  if (!adminHash) {
+  if (data.members.length === 0) {
     return (
       <GateShell>
         <SetupScreen onSetup={handleSetup} />
@@ -513,7 +605,7 @@ export default function TiffinLedger() {
     );
   }
 
-  if (!isLoggedIn) {
+  if (!isLoggedIn || !currentUser) {
     return (
       <GateShell>
         <LoginScreen onLogin={handleLogin} />
@@ -535,9 +627,9 @@ export default function TiffinLedger() {
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              {adminUsername && (
+              {currentUser && (
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-dim)" }}>
-                  {adminUsername}
+                  {currentUser.name}
                 </span>
               )}
               <button className="tl-btn" onClick={handleLogout} style={{ background: "transparent", color: "var(--ink-dim)", display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
@@ -575,12 +667,11 @@ export default function TiffinLedger() {
           </div>
 
           {showAddMember && (
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              <input className="tl-input" style={{ flex: 1 }} placeholder="Name" value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addMember()} autoFocus />
-              <button className="tl-btn" onClick={addMember} style={{ background: "var(--accent)", color: "#24312A", borderRadius: 6, padding: "8px 16px" }}>
-                Add
-              </button>
-            </div>
+            <AddFlatmateModal
+              onAdd={addFlatmate}
+              onClose={() => setShowAddMember(false)}
+              existingUsernames={data.members.map((m) => m.username || m.name)}
+            />
           )}
 
           {!loaded ? (
@@ -593,9 +684,11 @@ export default function TiffinLedger() {
                 <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 999, padding: "6px 6px 6px 12px", fontSize: 13 }}>
                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: m.color, display: "inline-block" }} />
                   {m.name}
-                  <button className="tl-btn" onClick={() => removeMember(m.id)} style={{ background: "transparent", color: "var(--ink-dim)", padding: 4, display: "flex" }} title="Remove flatmate">
-                    <Trash2 size={12} />
-                  </button>
+                  {m.id === currentUserId && (
+                    <button className="tl-btn" onClick={() => removeMember(m.id)} style={{ background: "transparent", color: "var(--ink-dim)", padding: 4, display: "flex" }} title="Remove my account">
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -607,10 +700,11 @@ export default function TiffinLedger() {
           <section style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 10, padding: 18, marginBottom: 32 }}>
             <div className="tl-form-row" style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <label style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--font-mono)" }}>WHO</label>
-                <select className="tl-select" value={formMember} onChange={(e) => setFormMember(e.target.value)}>
-                  {data.members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
+                <label style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--font-mono)" }}>LOGGING AS</label>
+                <div className="tl-input" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 100, color: "var(--ink)" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: currentUser?.color, flexShrink: 0 }} />
+                  {currentUser?.name}
+                </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label style={{ fontSize: 11, color: "var(--ink-dim)", fontFamily: "var(--font-mono)" }}>MEAL</label>
@@ -705,19 +799,60 @@ export default function TiffinLedger() {
             <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
               {visibleLog.map((e, i) => {
                 const m = memberById(e.memberId);
+                const isEditing = editingId === e.id;
                 return (
                   <div key={e.id} className="tl-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i === 0 ? "none" : "1px solid var(--line)", fontSize: 13 }}>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: m?.color || "#666", flexShrink: 0 }} />
                     <span style={{ width: 100, fontWeight: 600, flexShrink: 0 }}>{m?.name || "(removed)"}</span>
                     <span style={{ width: 90, color: "var(--ink-dim)", fontFamily: "var(--font-mono)", fontSize: 12, flexShrink: 0 }}>{e.date}</span>
                     <span style={{ width: 70, color: "var(--ink-dim)", flexShrink: 0 }}>{e.meal}</span>
-                    <span style={{ width: 40, fontFamily: "var(--font-mono)", fontWeight: 600, flexShrink: 0 }}>×{e.qty}</span>
-                    <span style={{ flex: 1, color: "var(--ink-dim)", fontStyle: e.note ? "normal" : "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {e.note || "—"}
-                    </span>
-                    <button className="tl-btn" onClick={() => deleteEntry(e.id)} style={{ background: "transparent", color: "var(--ink-dim)", padding: 4, display: "flex", flexShrink: 0 }} title="Remove entry">
-                      <Trash2 size={13} />
-                    </button>
+                    {isEditing ? (
+                      <>
+                        <input
+                          className="tl-input"
+                          type="number"
+                          min="0"
+                          autoFocus
+                          value={editQty}
+                          onChange={(ev) => setEditQty(ev.target.value)}
+                          style={{ width: 50, flexShrink: 0, fontFamily: "var(--font-mono)" }}
+                        />
+                        <input
+                          className="tl-input"
+                          type="text"
+                          placeholder="Note (optional)"
+                          value={editNote}
+                          onChange={(ev) => setEditNote(ev.target.value)}
+                          onKeyDown={(ev) => ev.key === "Enter" && saveEdit(e.id)}
+                          style={{ flex: 1, minWidth: 0 }}
+                        />
+                        <button className="tl-btn" onClick={() => saveEdit(e.id)} style={{ background: "transparent", color: "var(--accent)", padding: 4, display: "flex", flexShrink: 0 }} title="Save">
+                          <Check size={14} />
+                        </button>
+                        <button className="tl-btn" onClick={cancelEdit} style={{ background: "transparent", color: "var(--ink-dim)", padding: 4, display: "flex", flexShrink: 0 }} title="Cancel">
+                          <X size={14} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ width: 40, fontFamily: "var(--font-mono)", fontWeight: 600, flexShrink: 0 }}>×{e.qty}</span>
+                        <span style={{ flex: 1, color: "var(--ink-dim)", fontStyle: e.note ? "normal" : "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {e.note || "—"}
+                        </span>
+                        {e.memberId === currentUserId ? (
+                          <>
+                            <button className="tl-btn" onClick={() => startEdit(e)} style={{ background: "transparent", color: "var(--ink-dim)", padding: 4, display: "flex", flexShrink: 0 }} title="Edit entry">
+                              <Pencil size={13} />
+                            </button>
+                            <button className="tl-btn" onClick={() => deleteEntry(e.id)} style={{ background: "transparent", color: "var(--ink-dim)", padding: 4, display: "flex", flexShrink: 0 }} title="Remove entry">
+                              <Trash2 size={13} />
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ width: 42, flexShrink: 0 }} />
+                        )}
+                      </>
+                    )}
                   </div>
                 );
               })}
